@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# PyCharm
 .idea/
 
 rsc/CID-SMILES
