@@ -1,10 +1,7 @@
 import re
-from elasticsearch import Elasticsearch
 from functools import reduce
 from typing import Dict, Union
-
-es = Elasticsearch()
-db_name = "compounds"
+from elasticsearch import Elasticsearch, AsyncElasticsearch
 
 
 class Hit:
@@ -47,14 +44,10 @@ class Hit:
         return cls(source, highlights, score)
 
 
-def parse_hits(results):
-    yield from (Hit.parse_hit(result) for result in results)
-
-
-def search(query: str) -> Union[Dict, None]:
-    query = query.lower()
-    words = " ".join(re.findall(r"[a-z]+", query))
-    numbers = " ".join(re.findall(r"\d+", query))
+def generate_query_body(query: str) -> Dict:
+    query: str = query.lower()
+    words: str = " ".join(re.findall(r"[a-z]+", query))
+    numbers: str = " ".join(re.findall(r"\d+", query))
     query_body = {
       "size": 3,
       "query": {
@@ -181,13 +174,37 @@ def search(query: str) -> Union[Dict, None]:
         }
       }
     }
-    results = es.search(body=query_body, index=db_name)["hits"]["hits"]
-    hits = parse_hits(results)
+    return query_body
+
+
+def parse_response(results) -> Union[Dict, None]:
+    results: Dict = results["hits"]["hits"]
+    hits = (Hit.parse_hit(result) for result in results)
     for hit in hits:
         if hit.is_full_matched():
             return hit.source
-    return None
+    return None  # None means no matches
+
+
+def search(query: str, es: Elasticsearch, index="compounds") \
+        -> Union[Dict, None]:
+    query_body = generate_query_body(query)
+    results = es.search(body=query_body, index=index)
+    return parse_response(results)
+
+
+async def async_search(query: str, es: AsyncElasticsearch, index="compounds") \
+        -> Union[Dict, None]:
+    """
+    async version of search function
+    """
+    query_body = generate_query_body(query)
+    results = await es.search(body=query_body, index=index)
+    return parse_response(results)
 
 
 if __name__ == '__main__':
-    print(search("chlorodifluoromethane"))
+    from elasticsearch import Elasticsearch
+
+    elastic = Elasticsearch()
+    print(search("chlorodifluoromethane", elastic))
