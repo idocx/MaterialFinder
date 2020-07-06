@@ -1,20 +1,29 @@
 from fastapi import FastAPI
-from query_entry import search
+from query_entry import async_search
 from typing import Optional
-from elasticsearch import Elasticsearch
+from elasticsearch import AsyncElasticsearch
+import uvicorn
 
 api = FastAPI()
-es = Elasticsearch()
+es = AsyncElasticsearch()
 
 
 @api.get("/")
-def search_endpoint(q: Optional[str] = None):
+async def search_endpoint(q: Optional[str] = None):
     if not q:
         result = None
     else:
-        result = search(q, es)
+        result = await async_search(q, es, True)
     return {
         "query": q or "",
         "found": result is not None,
         "compound": result or {}
     }
+
+
+@api.on_event("shutdown")
+async def shutdown():
+    await es.close()
+
+
+uvicorn.run(api)

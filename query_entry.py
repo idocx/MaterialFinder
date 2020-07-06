@@ -1,6 +1,7 @@
 import re
+from utils import common_groups
 from functools import reduce
-from typing import Dict, Union
+from typing import Dict, Optional
 from elasticsearch import Elasticsearch, AsyncElasticsearch
 
 
@@ -19,17 +20,27 @@ class Hit:
     def highlights(self):
         return self._highlights
 
-    def is_full_matched(self, word_threshold=2, char_threshold=10) -> bool:
+    def is_full_matched(self, word_threshold=2, char_threshold=0.3) -> bool:
         """
         A simple post-filter
         """
         for highlight in self._highlights:
+            # the total number of chars
+            origin_name = re.sub(self.remove_tag_pattern, "", highlight)
+            char_number = sum(map(len, re.findall(r"\w+", origin_name)))
+
+            # remove highlighted words
             unmatched = re.sub(self.match_pattern, " ", highlight)
+
+            # count all the unmatched words
             unmatched_words = re.findall("[A-z]+", unmatched)
+            # filter common chemical groups
+            contain_extra_words = any(unmatched_word in common_groups for unmatched_word in unmatched_words)
             unmatched_char_number = sum(map(len, unmatched_words))
             if len(unmatched_words) <= word_threshold and \
-                    unmatched_char_number <= char_threshold:
-                self.source["hit"] = re.sub(self.remove_tag_pattern, "", highlight)
+                    unmatched_char_number / char_number <= char_threshold and \
+                    not contain_extra_words:
+                self.source["hit"] = origin_name
                 return True
         return False
 
@@ -40,14 +51,18 @@ class Hit:
         source.pop("synonyms", None)
         score = raw_hit.get("_score", None)
         highlights = raw_hit.get("highlight", {}).values()
-        highlights = reduce(lambda hs, h: hs.extend(h[:3]) or hs, highlights)
+        highlights = reduce(lambda hs, h: hs.extend(h[:5]) or hs, highlights, [])
         return cls(source, highlights, score)
 
 
-def generate_query_body(query: str) -> Dict:
+def generate_query_body(query: str, allow_fuzziness: bool) -> Dict:
+    """
+    get the query dict used for elasticsearch
+    """
     query: str = query.lower()
     words: str = " ".join(re.findall(r"[a-z]+", query))
     numbers: str = " ".join(re.findall(r"\d+", query))
+    fuzziness: str = allow_fuzziness and "AUTO" or "0"
     query_body = {
       "size": 3,
       "query": {
@@ -68,7 +83,8 @@ def generate_query_body(query: str) -> Dict:
                               "match": {
                                 "synonyms.synonym": {
                                   "query": words,
-                                  "operator": "and"
+                                  "operator": "and",
+                                  "fuzziness": fuzziness
                                 }
                               }
                             }
@@ -95,7 +111,8 @@ def generate_query_body(query: str) -> Dict:
                           "match": {
                             "title": {
                               "query": words,
-                              "operator": "and"
+                              "operator": "and",
+                              "fuzziness": fuzziness
                             }
                           }
                         }
@@ -177,7 +194,10 @@ def generate_query_body(query: str) -> Dict:
     return query_body
 
 
-def parse_response(results) -> Union[Dict, None]:
+def parse_response(results) -> Optional[Dict]:
+    """
+    parse the json file that elasticsearch returns
+    """
     results: Dict = results["hits"]["hits"]
     hits = (Hit.parse_hit(result) for result in results)
     for hit in hits:
@@ -186,25 +206,46 @@ def parse_response(results) -> Union[Dict, None]:
     return None  # None means no matches
 
 
-def search(query: str, es: Elasticsearch, index="compounds") \
-        -> Union[Dict, None]:
-    query_body = generate_query_body(query)
+def search(query: str, es: Elasticsearch,
+           allow_fuzziness: bool, index="compounds") \
+        -> Optional[Dict]:
+    """
+    sync version of search function
+    """
+    query_body = generate_query_body(query, allow_fuzziness=allow_fuzziness)
     results = es.search(body=query_body, index=index)
     return parse_response(results)
 
 
-async def async_search(query: str, es: AsyncElasticsearch, index="compounds") \
-        -> Union[Dict, None]:
+async def async_search(query: str, es: AsyncElasticsearch,
+                       allow_fuzziness: bool, index="compounds") \
+        -> Optional[Dict]:
     """
     async version of search function
     """
-    query_body = generate_query_body(query)
+    query_body = generate_query_body(query, allow_fuzziness=allow_fuzziness)
     results = await es.search(body=query_body, index=index)
     return parse_response(results)
 
 
 if __name__ == '__main__':
-    from elasticsearch import Elasticsearch
+    from elasticsearch import Elasticsearch, AsyncElasticsearch
+    from pymongo import MongoClient
+    from tqdm import tqdm
+    import asyncio
 
-    elastic = Elasticsearch()
-    print(search("chlorodifluoromethane", elastic))
+    elastic = AsyncElasticsearch()
+
+    db = MongoClient()["materials"]
+    collection = db["material_entities"]
+
+
+    async def generate():
+        for material in tqdm(collection.find()):
+            yield material
+
+    async def main():
+        async for material in generate():
+            await async_search(material["material_string"], elastic, True)
+
+    asyncio.run(main())

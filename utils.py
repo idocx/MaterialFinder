@@ -1,3 +1,21 @@
+import json
+
+element_names = tuple(map(
+    lambda entry: entry["name"].lower(),
+    json.load(open(r"rsc/pt.json", "r", encoding="utf-8"))
+))
+
+group_names = tuple(
+    json.load(open(r"rsc/common_groups.json", "r", encoding="utf-8"))
+)
+
+common_groups = {k: True for k in element_names + group_names}
+
+
+def prettify(result):
+    return json.dumps(result, indent=2)
+
+
 def make_action(method, index, source):
     _id = source.pop("uid")
     return {

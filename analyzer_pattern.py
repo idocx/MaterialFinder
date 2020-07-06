@@ -1,10 +1,3 @@
-import json
-
-elements_names = tuple(map(
-    lambda entry: entry["symbol"].lower(),
-    json.load(open(r"rsc/pt.json", "r", encoding="utf-8"))
-))
-
 hydrocarbon_suffixes = (
     # "al",
     # "ane",
