@@ -3,6 +3,7 @@ from utils import common_groups
 from functools import reduce
 from typing import Dict, Optional
 from elasticsearch import Elasticsearch, AsyncElasticsearch
+from elasticsearch.exceptions import ConnectionError
 
 
 class Hit:
@@ -89,11 +90,8 @@ def generate_query_body(query: str, allow_fuzziness: bool) -> Dict:
     }
 
     # enable / disable fuzziness search
-    if allow_fuzziness:
-        if len(words) > 14:
-            query_words.update(fuzziness=2)
-        elif len(words) > 6:
-            query_words.update(fuzziness=1)
+    if allow_fuzziness and len(words) > 6:
+        query_words.update(fuzziness=1)
 
     # query to be sent
     query_body = {
@@ -226,8 +224,13 @@ def search(query: str, es: Elasticsearch,
     """
     sync version of search function
     """
+    if len(query) < 3:
+        return None
     query_body = generate_query_body(query, allow_fuzziness=allow_fuzziness)
-    results = es.search(body=query_body, index=index)
+    try:
+        results = es.search(body=query_body, index=index)
+    except TimeoutError and ConnectionError:
+        return None
     return parse_response(results)
 
 
@@ -237,8 +240,13 @@ async def async_search(query: str, es: AsyncElasticsearch,
     """
     async version of search function
     """
+    if len(query) < 3:
+        return None
     query_body = generate_query_body(query, allow_fuzziness=allow_fuzziness)
-    results = await es.search(body=query_body, index=index)
+    try:
+        results = await es.search(body=query_body, index=index)
+    except TimeoutError and ConnectionError:
+        return None
     return parse_response(results)
 
 
@@ -247,18 +255,30 @@ if __name__ == '__main__':
     from tqdm import tqdm
     import asyncio
 
-    elastic = AsyncElasticsearch()
+    elastic = Elasticsearch()
+
+    print(search("polybenzimidazole", elastic, True))
+
+    elastic = AsyncElasticsearch(timeout=10)
 
     db = MongoClient()["materials"]
     collection = db["material_entities"]
 
+    cnter = tqdm()
 
     async def generate():
-        for material in tqdm(collection.find()):
-            yield material
+        for material in collection.find():
+            if not re.fullmatch(r"([A-Z][a-z]?\d*)+", re.sub(r"\W+", "", material["material_string"])):
+                yield material["material_string"]
 
     async def main():
-        async for material in generate():
-            await async_search(material["material_string"], elastic, True)
+        try:
+            async for material in generate():
+                print(material)
+                a = await async_search(material, elastic, False)
+                print(a)
+                cnter.update()
+        finally:
+            await elastic.close()
 
     asyncio.run(main())
