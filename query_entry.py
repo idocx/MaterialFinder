@@ -90,7 +90,10 @@ def generate_query_body(query: str, allow_fuzziness: bool) -> Dict:
 
     # enable / disable fuzziness search
     if allow_fuzziness:
-        query_words.update(fuzziness="AUTO:6,14")
+        if len(words) > 14:
+            query_words.update(fuzziness=2)
+        elif len(words) > 6:
+            query_words.update(fuzziness=1)
 
     # query to be sent
     query_body = {

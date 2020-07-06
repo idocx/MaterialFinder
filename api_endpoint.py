@@ -12,8 +12,8 @@ es = AsyncElasticsearch(timeout=timeout)
 
 
 @api.get("/search")
-async def search_endpoint(q: Optional[str] = None, fuzziness: Optional[bool] = True):
-    if not q:
+async def search_endpoint(q: str = "", fuzziness: Optional[bool] = True):
+    if len(q) < 3:
         result = None
     else:
         try:
