@@ -2,18 +2,29 @@ from fastapi import FastAPI
 from query_entry import async_search
 from typing import Optional
 from elasticsearch import AsyncElasticsearch
+from elasticsearch.exceptions import ConnectionError
 import uvicorn
 
+timeout = 5
+
 api = FastAPI()
-es = AsyncElasticsearch()
+es = AsyncElasticsearch(timeout=timeout)
 
 
-@api.get("/")
-async def search_endpoint(q: Optional[str] = None):
+@api.get("/search")
+async def search_endpoint(q: Optional[str] = None, fuzziness: Optional[bool] = True):
     if not q:
         result = None
     else:
-        result = await async_search(q, es, True)
+        try:
+            result = await async_search(q, es, fuzziness)
+        except ConnectionError:
+            return {
+                "query": q or "",
+                "found": False,
+                "compound": {},
+                "reason": f"Time out, max request time is {timeout}s."
+            }
     return {
         "query": q or "",
         "found": result is not None,
@@ -26,4 +37,4 @@ async def shutdown():
     await es.close()
 
 
-uvicorn.run(api)
+uvicorn.run(api, port=11451)

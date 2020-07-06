@@ -58,11 +58,41 @@ class Hit:
 def generate_query_body(query: str, allow_fuzziness: bool) -> Dict:
     """
     get the query dict used for elasticsearch
+
+    fuzziness policy:
+        if allow_fuzziness is True and length of words in query > 6:
+            enable fuzziness
+        else:
+            disable fuzziness
     """
+    # lower the query and split words and numbers
     query: str = query.lower()
     words: str = " ".join(re.findall(r"[a-z]+", query))
     numbers: str = " ".join(re.findall(r"\d+", query))
-    fuzziness: str = allow_fuzziness and "AUTO" or "0"
+
+    # search query for matching words
+    query_words = {
+        "query": words,
+        "operator": "and",
+    }
+
+    # search query for matching numbers
+    query_numbers = {
+        "query": numbers,
+        "boost": 0.4
+    }
+
+    # search query for matching phrase
+    query_phrase = {
+        "query": words,
+        "slop": 3
+    }
+
+    # enable / disable fuzziness search
+    if allow_fuzziness:
+        query_words.update(fuzziness="AUTO:6,14")
+
+    # query to be sent
     query_body = {
       "size": 3,
       "query": {
@@ -81,21 +111,14 @@ def generate_query_body(query: str, allow_fuzziness: bool) -> Dict:
                           "must": [
                             {
                               "match": {
-                                "synonyms.synonym": {
-                                  "query": words,
-                                  "operator": "and",
-                                  "fuzziness": fuzziness
-                                }
+                                "synonyms.synonym": query_words
                               }
                             }
                           ],
                           "should": [
                             {
                               "match": {
-                                "synonyms.synonym": {
-                                  "query": numbers,
-                                  "boost": 0.4
-                                }
+                                "synonyms.synonym": query_numbers
                               }
                             }
                           ]
@@ -109,21 +132,14 @@ def generate_query_body(query: str, allow_fuzziness: bool) -> Dict:
                       "must": [
                         {
                           "match": {
-                            "title": {
-                              "query": words,
-                              "operator": "and",
-                              "fuzziness": fuzziness
-                            }
+                            "title": query_words
                           }
                         }
                       ],
                       "should": [
                         {
                           "match": {
-                            "title": {
-                              "query": numbers,
-                              "boost": 0.4
-                            }
+                            "title": query_numbers
                           }
                         }
                       ],
@@ -153,10 +169,7 @@ def generate_query_body(query: str, allow_fuzziness: bool) -> Dict:
               "queries": [
                 {
                   "match_phrase": {
-                    "title": {
-                      "query": words,
-                      "slop": 3
-                    }
+                    "title": query_phrase
                   }
                 },
                 {
@@ -164,10 +177,7 @@ def generate_query_body(query: str, allow_fuzziness: bool) -> Dict:
                     "path": "synonyms",
                     "query": {
                       "match_phrase": {
-                        "synonyms.synonym": {
-                          "query": words,
-                          "slop": 3
-                        }
+                        "synonyms.synonym": query_phrase
                       }
                     },
                     "score_mode": "max"
@@ -191,6 +201,7 @@ def generate_query_body(query: str, allow_fuzziness: bool) -> Dict:
         }
       }
     }
+
     return query_body
 
 
@@ -229,7 +240,6 @@ async def async_search(query: str, es: AsyncElasticsearch,
 
 
 if __name__ == '__main__':
-    from elasticsearch import Elasticsearch, AsyncElasticsearch
     from pymongo import MongoClient
     from tqdm import tqdm
     import asyncio
